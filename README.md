@@ -56,7 +56,7 @@ blog_management/
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/YOUR_USERNAME/blog-management-system.git
+git clone https://github.com/Sarahsayedeed/blog-management-system.git
 cd blog-management-system
 
 # 2. Create virtual environment
