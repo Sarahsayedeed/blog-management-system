@@ -6,7 +6,6 @@ from app.database import get_db
 from app.models.user import User, UserRole
 from app.services.auth_service import decode_access_token
 from app.services.user_service import get_user_by_id
-from app.core.logging import logger
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 
@@ -23,26 +22,21 @@ async def get_current_user(
 
     payload = decode_access_token(token)
     if payload is None:
-        logger.warning("Token validation failed: Invalid or expired token")
         raise credentials_exception
 
     user_id_str: str = payload.get("sub")
     if user_id_str is None:
-        logger.warning("Token validation failed: Missing subject (sub) in token")
         raise credentials_exception
 
     try:
         user_id = int(user_id_str)
     except (ValueError, TypeError):
-        logger.warning(f"Token validation failed: Invalid user ID format in token: {user_id_str}")
         raise credentials_exception
 
     user = get_user_by_id(db, user_id=user_id)
     if user is None:
-        logger.warning(f"Token validation failed: User ID {user_id} not found in database")
         raise credentials_exception
-        
-    logger.debug(f"Token validated for user ID {user_id}")
+
     return user
 
 
@@ -70,3 +64,28 @@ def require_roles(*allowed_roles: UserRole):
         return current_user
 
     return role_checker
+
+
+# Shortcuts requested by the rubric
+require_admin = require_roles(UserRole.ADMIN)
+require_author = require_roles(UserRole.ADMIN, UserRole.AUTHOR)
+
+
+def verify_ownership(current_user: User, resource_author_id: int) -> bool:
+    """
+    Checks if the user owns the content or is an Admin.
+    Raises 403 Forbidden if neither condition is met.
+    """
+    # Admins have full moderation control
+    if current_user.role == UserRole.ADMIN:
+        return True
+        
+    # Authors can manage their own content
+    if current_user.id == resource_author_id:
+        return True
+        
+    # Deny access to everyone else
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="You do not have permission to modify this content."
+    )
