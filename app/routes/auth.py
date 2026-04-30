@@ -5,6 +5,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm          # ← ADD THIS
 from sqlalchemy.orm import Session
 
+from app.core.logging import logger
+
 from app.config import settings
 from app.database import get_db
 from app.models.user import User, UserRole
@@ -67,9 +69,12 @@ def login(
     form_data: OAuth2PasswordRequestForm = Depends(),   # ← CHANGED
     db: Session = Depends(get_db),
 ):
+    logger.info("Login attempt", extra={"username": form_data.username})
+    
     # OAuth2PasswordRequestForm has .username and .password fields
     user = get_user_by_username(db, form_data.username)  # ← CHANGED
     if not user:
+        logger.warning("Login failed: User not found", extra={"username": form_data.username})
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid username or password",
@@ -77,6 +82,7 @@ def login(
         )
 
     if not verify_password(form_data.password, user.hashed_password):  # ← CHANGED
+        logger.warning("Login failed: Invalid password", extra={"username": form_data.username})
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid username or password",
@@ -84,6 +90,7 @@ def login(
         )
 
     if not user.is_active:
+        logger.warning("Login failed: Account deactivated", extra={"username": form_data.username})
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Account is deactivated. Contact an administrator.",
@@ -99,6 +106,7 @@ def login(
         expires_delta=access_token_expires,
     )
 
+    logger.info("Login successful", extra={"username": form_data.username, "user_id": user.id})
     return Token(access_token=access_token, token_type="bearer")
 
 

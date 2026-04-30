@@ -3,9 +3,15 @@ from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.core.logging import setup_logging
+from app.core.middleware import LoggingMiddleware
+
 from app.database import engine, Base
 from app.routes import auth
 from app.models import User  # noqa: F401
+
+# Initialize structured JSON logging (loguru)
+setup_logging()
 
 Base.metadata.create_all(bind=engine)
 
@@ -22,6 +28,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(LoggingMiddleware)
 
 
 @app.exception_handler(RequestValidationError)
