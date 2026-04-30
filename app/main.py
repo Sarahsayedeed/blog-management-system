@@ -7,6 +7,9 @@ from prometheus_fastapi_instrumentator import Instrumentator
 from app.core.logging import setup_logging
 from app.core.middleware import LoggingMiddleware
 
+from app.core.logging import setup_logging
+from app.core.middleware import LoggingMiddleware
+
 from app.database import engine, Base
 from app.routes import auth
 from app.routes import comments
@@ -14,6 +17,9 @@ from app.routes import comments
 from app.models import User  # noqa: F401
 from app.models.post import Post  # noqa: F401
 from app.models.comment import Comment  # noqa: F401
+
+# Initialize structured JSON logging (loguru)
+setup_logging()
 
 # Initialize structured JSON logging (loguru)
 setup_logging()
