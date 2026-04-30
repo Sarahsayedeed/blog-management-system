@@ -6,6 +6,7 @@ from app.database import get_db
 from app.models.user import User, UserRole
 from app.services.auth_service import decode_access_token
 from app.services.user_service import get_user_by_id
+from app.core.logging import logger
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 
@@ -22,21 +23,26 @@ async def get_current_user(
 
     payload = decode_access_token(token)
     if payload is None:
+        logger.warning("Token validation failed: Invalid or expired token")
         raise credentials_exception
 
     user_id_str: str = payload.get("sub")
     if user_id_str is None:
+        logger.warning("Token validation failed: Missing subject (sub) in token")
         raise credentials_exception
 
     try:
         user_id = int(user_id_str)
     except (ValueError, TypeError):
+        logger.warning(f"Token validation failed: Invalid user ID format in token: {user_id_str}")
         raise credentials_exception
 
     user = get_user_by_id(db, user_id=user_id)
     if user is None:
+        logger.warning(f"Token validation failed: User ID {user_id} not found in database")
         raise credentials_exception
-
+        
+    logger.debug(f"Token validated for user ID {user_id}")
     return user
 
 
