@@ -2,10 +2,15 @@ from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from prometheus_fastapi_instrumentator import Instrumentator
 
 from app.database import engine, Base
 from app.routes import auth
+from app.routes import comments
+
 from app.models import User  # noqa: F401
+from app.models.post import Post  # noqa: F401
+from app.models.comment import Comment  # noqa: F401
 
 Base.metadata.create_all(bind=engine)
 
@@ -14,6 +19,8 @@ app = FastAPI(
     description="A backend system for a blogging platform.",
     version="1.0.0",
 )
+
+Instrumentator().instrument(app).expose(app)
 
 app.add_middleware(
     CORSMiddleware,
@@ -48,7 +55,7 @@ async def general_exception_handler(request: Request, exc: Exception):
 
 
 app.include_router(auth.router)
-
+app.include_router(comments.router)
 
 @app.get("/", tags=["Root"])
 def root():
