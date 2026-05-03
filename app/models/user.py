@@ -3,6 +3,7 @@ from datetime import datetime
 
 from sqlalchemy import Column, Integer, String, Enum, DateTime
 from sqlalchemy.sql import func
+from sqlalchemy.orm import relationship
 
 from app.database import Base
 
@@ -28,6 +29,7 @@ class User(Base):
         server_default=func.now(),
         onupdate=func.now(),
     )
+    comments = relationship("Comment", back_populates="author", cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"<User(id={self.id}, username='{self.username}', role='{self.role}')>"

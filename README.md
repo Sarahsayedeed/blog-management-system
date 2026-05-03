@@ -275,3 +275,40 @@ API endpoints: register, login, get profile, list users.
 ### app/main.py
 Entry point: creates FastAPI app, adds middleware, registers routes,
 creates database tables, handles errors.
+
+
+---
+
+## 📊 Monitoring Dashboard (Member 4)
+
+### Stack
+- **Prometheus** → Collects API metrics
+- **Grafana** → Visualizes the metrics
+
+### Setup
+Run everything with one command:
+```bash
+docker-compose up --build
+```
+
+### Access
+| Service | URL |
+|---------|-----|
+| API | http://localhost:8000 |
+| API Docs | http://localhost:8000/docs |
+| Metrics | http://localhost:8000/metrics |
+| Prometheus | http://localhost:9090 |
+| Grafana | http://localhost:3000 |
+
+### Grafana Login
+- Username: `admin`
+- Password: `admin`
+
+### Dashboard Panels
+1. **API Request Counts** → Total requests per endpoint
+2. **Response Times** → How fast the API responds
+3. **Error Rates** → Failed requests tracking
+4. **System Health** → API uptime status
+
+### Data Source
+- Add Prometheus as data source: `http://prometheus:9090`
