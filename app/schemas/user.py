@@ -56,3 +56,7 @@ class TokenData(BaseModel):
 
 class MessageResponse(BaseModel):
     message: str
+
+
+class UserRoleUpdate(BaseModel):
+    role: UserRole   
