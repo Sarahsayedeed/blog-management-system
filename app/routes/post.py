@@ -7,7 +7,7 @@ from app.models.post import Post
 from app.models.user import User
 from app.schemas.post import PostCreate, PostUpdate, PostResponse
 from app.dependencies.auth import require_author, verify_ownership
-
+from app.core.exceptions import PostNotFoundError
 # --- ADDED: Import the custom logger ---
 from app.logger import custom_logger as logger
 
@@ -82,7 +82,7 @@ def update_post(
     if not post:
         # --- LOGGING: Update Failed (Not Found) ---
         logger.bind(post_id=post_id).warning("Update failed: Post not found")
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Post not found")
+        raise PostNotFoundError()
     
     # Enforce Ownership Validation (Your auth middleware will throw 403 if it fails)
     verify_ownership(current_user, post.author_id)
@@ -112,7 +112,7 @@ def delete_post(
     if not post:
         # --- LOGGING: Delete Failed (Not Found) ---
         logger.bind(post_id=post_id).warning("Delete failed: Post not found")
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Post not found")
+        raise PostNotFoundError()
 
     # Enforce Ownership Validation
     verify_ownership(current_user, post.author_id)
