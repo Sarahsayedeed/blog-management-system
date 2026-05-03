@@ -7,6 +7,9 @@ from app.models.user import User, UserRole
 from app.services.auth_service import decode_access_token
 from app.services.user_service import get_user_by_id
 from app.core.logging import logger
+from app.database import get_db
+from app.models.post import Post
+from app.models.user import User
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 
@@ -70,3 +73,21 @@ def require_roles(*allowed_roles: UserRole):
         return current_user
 
     return role_checker
+
+
+def verify_ownership(post_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    post = db.query(Post).filter(Post.id == post_id).first()
+    
+    if not post:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Post not found"
+        )
+        
+    if post.author_id != current_user.id and current_user.role != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You are not authorized to modify this post"
+        )
+        
+    return post
