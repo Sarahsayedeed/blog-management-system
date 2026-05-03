@@ -3,10 +3,10 @@ from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.logger import custom_logger as logger
 from app.models.user import User, UserRole
 from app.services.auth_service import decode_access_token
 from app.services.user_service import get_user_by_id
-from app.core.logging import logger
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 
@@ -23,26 +23,26 @@ async def get_current_user(
 
     payload = decode_access_token(token)
     if payload is None:
-        logger.warning("Token validation failed: Invalid or expired token")
+        logger.bind(token_summary=(token[:20] + "...") if token else None).warning("Token validation failed")
         raise credentials_exception
 
     user_id_str: str = payload.get("sub")
     if user_id_str is None:
-        logger.warning("Token validation failed: Missing subject (sub) in token")
+        logger.bind(token_summary=(token[:20] + "...") if token else None).warning("Token missing subject claim")
         raise credentials_exception
 
     try:
         user_id = int(user_id_str)
     except (ValueError, TypeError):
-        logger.warning(f"Token validation failed: Invalid user ID format in token: {user_id_str}")
+        logger.bind(token_summary=(token[:20] + "...") if token else None).warning("Token subject claim invalid")
         raise credentials_exception
 
     user = get_user_by_id(db, user_id=user_id)
     if user is None:
-        logger.warning(f"Token validation failed: User ID {user_id} not found in database")
+        logger.bind(user_id=user_id).warning("User from token not found")
         raise credentials_exception
-        
-    logger.debug(f"Token validated for user ID {user_id}")
+
+    logger.bind(user_id=user.id, username=user.username, role=user.role.value).debug("Token validated successfully")
     return user
 
 
@@ -70,3 +70,28 @@ def require_roles(*allowed_roles: UserRole):
         return current_user
 
     return role_checker
+
+
+# Shortcuts requested by the rubric
+require_admin = require_roles(UserRole.ADMIN)
+require_author = require_roles(UserRole.ADMIN, UserRole.AUTHOR)
+
+
+def verify_ownership(current_user: User, resource_author_id: int) -> bool:
+    """
+    Checks if the user owns the content or is an Admin.
+    Raises 403 Forbidden if neither condition is met.
+    """
+    # Admins have full moderation control
+    if current_user.role == UserRole.ADMIN:
+        return True
+        
+    # Authors can manage their own content
+    if current_user.id == resource_author_id:
+        return True
+        
+    # Deny access to everyone else
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="You do not have permission to modify this content."
+    )
