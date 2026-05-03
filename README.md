@@ -1,8 +1,10 @@
+
+```markdown
 # Blog Management System — Backend API
 
 ## 👤 Person 1: Project Setup & Auth Foundation
 
-### What I Built
+### What I Built (Phase 1)
 I built the **foundation** of the entire project. Everything other team members
 build will use my code as the base.
 
@@ -21,27 +23,32 @@ blog_management/
 │   │
 │   ├── models/                  # Database table definitions
 │   │   ├── __init__.py
-│   │   └── user.py              # Users table
+│   │   ├── user.py              # Users table
+│   │   └── post.py              # Posts table
 │   │
 │   ├── schemas/                 # Request/Response validation
 │   │   ├── __init__.py
-│   │   └── user.py              # What data looks like in API
+│   │   ├── user.py              # What data looks like in API
+│   │   └── post.py              # Post validation schemas
 │   │
-│   ├── services/                # Business logic
+│   ├── services/                # Business logic & Integrations
 │   │   ├── __init__.py
 │   │   ├── auth_service.py      # Password hashing + JWT tokens
-│   │   └── user_service.py      # Database operations for users
+│   │   ├── user_service.py      # Database operations for users
+│   │   └── redis_cache.py       # Redis connection & caching utilities
 │   │
 │   ├── routes/                  # API endpoints
 │   │   ├── __init__.py
-│   │   └── auth.py              # /auth/register, /auth/login, etc.
+│   │   ├── auth.py              # /auth/register, /auth/login, etc.
+│   │   ├── posts.py             # /posts endpoints (with caching)
+│   │   └── comments.py          # /comments endpoints
 │   │
 │   └── dependencies/            # Shared security guards
 │       ├── __init__.py
 │       └── auth.py              # Token validation + role checking
 │
 ├── Dockerfile                   # Docker image configuration
-├── docker-compose.yml           # Docker services (app + database)
+├── docker-compose.yml           # Docker services (app + database + redis)
 ├── .dockerignore                # Files excluded from Docker
 ├── .env                         # Environment variables (DO NOT COMMIT)
 ├── .gitignore                   # Files excluded from Git
@@ -77,17 +84,21 @@ pip install -r requirements.txt
 # SECRET_KEY=09d25e094faa6ca2556c818166b7a9563b93f7099f6f0f4caa6cf63b88e8d3e7
 # ALGORITHM=HS256
 # ACCESS_TOKEN_EXPIRE_MINUTES=30
+# REDIS_URL=redis://localhost:6379/0
 
-# 6. Run the server
+# 6. Ensure Redis is running locally (Important for Caching)
+
+# 7. Run the server
 uvicorn app.main:app --reload
 
-# 7. Open browser
+# 8. Open browser
 # http://localhost:8000/docs
 ```
 
-### Option 2: With Docker
+### Option 2: With Docker (Recommended)
 
 ```bash
+# This will spin up the API, DB, Redis, and Monitoring tools
 docker compose up --build
 # Open: http://localhost:8000/docs
 ```
@@ -103,6 +114,8 @@ docker compose up --build
 | POST   | /auth/login      | No            | None          | Login + get JWT token    |
 | GET    | /auth/me         | Yes           | Any           | Get current user profile |
 | GET    | /auth/users      | Yes           | Admin only    | List all users           |
+
+*(Refer to Swagger UI `/docs` for Posts and Comments endpoints)*
 
 ---
 
@@ -122,160 +135,92 @@ docker compose up --build
 ```
 Client sends: username + email + password + role(optional)
     ↓
-Server validates input (Pydantic)
+Server validates input (Pydantic) → checks duplicates
     ↓
-Server checks for duplicate username/email
-    ↓
-Server hashes password (bcrypt)
-    ↓
-Server saves user to database
-    ↓
-Server returns user info (without password)
+Server hashes password (bcrypt) → saves user to DB
 ```
 
 ### Login Flow:
 ```
 Client sends: username + password
     ↓
-Server finds user by username
-    ↓
 Server verifies password against hash
     ↓
 Server creates JWT token with: user_id + username + role
-    ↓
-Server returns: { access_token: "eyJ...", token_type: "bearer" }
 ```
 
 ### Protected Route Flow:
 ```
-Client sends request with header: Authorization: Bearer eyJ...
+Client sends header: Authorization: Bearer eyJ...
     ↓
-get_current_user dependency extracts token
+get_current_user extracts & decodes token → fetches User from DB
     ↓
-Token is decoded and verified
-    ↓
-User is fetched from database
-    ↓
-If role check needed → require_roles checks the role
-    ↓
-Request proceeds or returns 401/403 error
+require_roles checks role → Proceeds or returns 401/403
 ```
 
 ---
 
-## 🔧 For Team Members: How to Use My Code
+## 🧠 Member 1 (Phase 2): Redis Caching Layer
+
+### What I Built
+Implemented the **Cache-Aside Pattern** using Redis to drastically optimize read-heavy endpoints (GET requests) and reduce database load.
+
+### 🔑 Cache Keys Naming Convention
+To ensure consistency and allow easy cache invalidation, we follow this naming convention: `entity:scope:parameters`
+
+| Entity   | Endpoint | Cache Key Format | Example |
+|----------|----------|-------------------|---------|
+| **Posts** | GET All Posts | `posts:all:skip_{skip}:limit_{limit}` | `posts:all:skip_0:limit_10` |
+| **Posts** | GET Post by ID | `post:{id}` | `post:15` |
+
+### 🛠️ For Team Members: How to Use Cache (Member 2)
+
+I have created utility functions in `app/services/redis_cache.py` for you to implement **Cache Invalidation**:
+
+```python
+from app.services.redis_cache import delete_cache, delete_cache_pattern
+
+# 1. When a new post is CREATED (Clear paginated lists)
+await delete_cache_pattern("posts:all:*")
+
+# 2. When a specific post is UPDATED or DELETED (Clear specific item)
+await delete_cache(f"post:{post_id}")
+```
+
+---
+
+## 🔧 For Team Members: How to Use Auth Logic
 
 ### Import these in your routes:
 
 ```python
-# To protect a route (user must be logged in)
-from app.dependencies.auth import get_current_active_user
-
-# To restrict by role
-from app.dependencies.auth import require_roles
-
-# To access database
+from app.dependencies.auth import get_current_active_user, require_roles
 from app.database import get_db
-
-# To use User model and roles
 from app.models.user import User, UserRole
-```
-
-### Example: Protect your endpoint (any logged-in user)
-
-```python
-from fastapi import APIRouter, Depends
-from app.dependencies.auth import get_current_active_user
-from app.models.user import User
-
-router = APIRouter()
-
-@router.get("/posts")
-def get_posts(current_user: User = Depends(get_current_active_user)):
-    # Only logged-in users can access this
-    # current_user contains the user's info
-    return {"message": f"Hello {current_user.username}"}
 ```
 
 ### Example: Admin-only endpoint
 
 ```python
-from app.dependencies.auth import require_roles
-from app.models.user import UserRole
-
 @router.delete("/posts/{post_id}")
 def delete_post(
     post_id: int,
     current_user: User = Depends(require_roles(UserRole.ADMIN))
 ):
-    # Only admins can delete posts
     return {"message": "Post deleted"}
-```
-
-### Example: Author can manage own content
-
-```python
-@router.put("/posts/{post_id}")
-def update_post(
-    post_id: int,
-    current_user: User = Depends(require_roles(UserRole.ADMIN, UserRole.AUTHOR))
-):
-    # Admin OR Author can update
-    return {"message": "Post updated"}
-```
-
-### How to add your router to the app:
-
-```python
-# In app/main.py, add:
-from app.routes import posts     # your new router file
-app.include_router(posts.router)
 ```
 
 ---
 
 ## 📂 File-by-File Explanation
 
-### app/config.py
-Reads settings from .env file. Every other file uses `settings` from here.
-
-### app/database.py
-Creates database connection. Provides `get_db` dependency for routes.
-Works with both SQLite (local) and PostgreSQL (Docker).
-
-### app/models/user.py
-Defines the Users database table with columns:
-- id, username, email, hashed_password, role, is_active, created_at, updated_at
-
-### app/schemas/user.py
-Defines what data looks like in requests and responses:
-- UserCreate: what client sends for registration
-- UserLogin: what client sends for login
-- UserResponse: what server returns (never includes password)
-- Token: JWT token response
-
-### app/services/auth_service.py
-- hash_password(): Converts plain password to bcrypt hash
-- verify_password(): Checks if password matches hash
-- create_access_token(): Creates a JWT token
-- decode_access_token(): Reads and validates a JWT token
-
-### app/services/user_service.py
-Database operations: create user, find by id/username/email, list all users.
-
-### app/dependencies/auth.py
-Security guards:
-- get_current_user: Validates JWT → returns User object
-- get_current_active_user: Same + checks if account is active
-- require_roles(): Checks if user has the required role
-
-### app/routes/auth.py
-API endpoints: register, login, get profile, list users.
-
-### app/main.py
-Entry point: creates FastAPI app, adds middleware, registers routes,
-creates database tables, handles errors.
-
+- **`app/config.py`**: Reads settings from `.env`.
+- **`app/database.py`**: DB connection setup.
+- **`app/models/*.py`**: Database tables (SQLAlchemy).
+- **`app/schemas/*.py`**: Request/Response validation (Pydantic).
+- **`app/services/auth_service.py`**: Hashing and JWT generation.
+- **`app/services/redis_cache.py`**: Redis logic (get, set, delete).
+- **`app/dependencies/auth.py`**: Guards for token and role validation.
 
 ---
 
@@ -312,3 +257,4 @@ docker-compose up --build
 
 ### Data Source
 - Add Prometheus as data source: `http://prometheus:9090`
+```

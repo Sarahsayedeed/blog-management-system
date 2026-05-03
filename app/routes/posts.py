@@ -1,72 +1,111 @@
-from fastapi import APIRouter, Depends, status
 from typing import List
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from sqlalchemy.exc import SQLAlchemyError
+from fastapi.encoders import jsonable_encoder
 
-from app.core.exceptions import PostNotFoundError, UnauthorizedActionError, AppException
 from app.database import get_db
 from app.models.post import Post
 from app.models.user import User, UserRole
-from app.dependencies.auth import get_current_active_user, require_roles
 from app.schemas.post import PostCreate, PostUpdate, PostResponse
+from app.dependencies.auth import require_roles, verify_ownership
 from app.core.logging import logger
+from app.services.redis_cache import get_cache, set_cache, delete_cache_pattern
 
 router = APIRouter(prefix="/posts", tags=["Posts"])
 
 
 @router.post("/", response_model=PostResponse, status_code=status.HTTP_201_CREATED)
-async def create_post(
+def create_post(
     post: PostCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(UserRole.AUTHOR, UserRole.ADMIN)),
+    current_user: User = Depends(require_roles(UserRole.AUTHOR, UserRole.ADMIN))
 ):
     try:
         new_post = Post(**post.model_dump(), author_id=current_user.id)
         db.add(new_post)
         db.commit()
         db.refresh(new_post)
-        logger.bind(post_id=new_post.id, author_id=current_user.id).info("Created new post")
+        logger.info(f"Created new post", extra={"post_id": new_post.id, "author_id": current_user.id})
         return new_post
-    except SQLAlchemyError as e:
+    except Exception as e:
+        logger.error(f"Failed to create post: {str(e)}", exc_info=True)
         db.rollback()
-        logger.bind(error=str(e)).error("Failed to create post")
-        raise AppException(detail="Failed to create post")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/", response_model=List[PostResponse])
 async def list_posts(skip: int = 0, limit: int = 10, db: Session = Depends(get_db)):
-    posts = db.query(Post).offset(skip).limit(limit).all()
-    logger.bind(skip=skip, limit=limit, count=len(posts)).info("Fetched posts list")
-    return posts
+    cache_key = f"posts:all:skip_{skip}:limit_{limit}"
+
+    # --- Step 1: Try to fetch from Redis cache first ---
+    try:
+        cached_posts = await get_cache(cache_key)
+        if cached_posts:
+            logger.info("Fetched posts list from REDIS CACHE", extra={"skip": skip, "limit": limit})
+            return cached_posts
+    except Exception as e:
+        logger.warning(f"Redis lookup failed: {e}")
+
+    # --- Step 2: Cache miss — fetch from DB ---
+    try:
+        posts = db.query(Post).offset(skip).limit(limit).all()
+
+        # FIX: Convert SQLAlchemy objects to JSON-serializable dicts before caching.
+        # Previously, raw ORM objects were passed to set_cache, which Redis can't serialize.
+        await set_cache(cache_key, jsonable_encoder(posts), expire=300)
+
+        logger.info("Fetched posts list from DB", extra={"skip": skip, "limit": limit, "count": len(posts)})
+        return posts
+    except Exception as e:
+        logger.error(f"Failed to fetch posts list: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/{id}", response_model=PostResponse)
 async def get_post(id: int, db: Session = Depends(get_db)):
-    db_post = db.query(Post).filter(Post.id == id).first()
-    if not db_post:
-        logger.bind(post_id=id).warning("Post fetch failed: Not found")
-        raise PostNotFoundError()
-    logger.bind(post_id=id).info("Fetched single post")
-    return db_post
+    cache_key = f"post:{id}"
+
+    # --- Step 1: Try to fetch from Redis cache first ---
+    try:
+        cached_post = await get_cache(cache_key)
+        if cached_post:
+            logger.info(f"Fetched post {id} from REDIS CACHE")
+            return cached_post
+    except Exception as e:
+        logger.warning(f"Redis lookup failed: {e}")
+
+    # --- Step 2: Cache miss — fetch from DB ---
+    try:
+        db_post = db.query(Post).filter(Post.id == id).first()
+        if not db_post:
+            logger.warning(f"Post fetch failed: Not found", extra={"post_id": id})
+            raise HTTPException(status_code=404, detail="Post not found")
+
+        # FIX: Convert SQLAlchemy object to JSON-serializable dict before caching.
+        # Previously, raw ORM objects were passed to set_cache, which Redis can't serialize.
+        await set_cache(cache_key, jsonable_encoder(db_post), expire=600)
+
+        logger.info("Fetched single post from DB", extra={"post_id": id})
+        return db_post
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Database error while fetching post {id}: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.put("/{id}", response_model=PostResponse)
-async def update_post(
+async def update_post(  # FIX: Changed from `def` to `async def` to support await calls below
     id: int,
     post_update: PostUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(UserRole.AUTHOR, UserRole.ADMIN)),
+    current_user: User = Depends(require_roles(UserRole.AUTHOR, UserRole.ADMIN))
 ):
     db_post = db.query(Post).filter(Post.id == id).first()
     if not db_post:
-        logger.bind(post_id=id).warning("Post update failed: Not found")
-        raise PostNotFoundError()
+        raise HTTPException(status_code=404, detail="Post not found")
 
-    if current_user.role != UserRole.ADMIN and db_post.author_id != current_user.id:
-        logger.bind(post_id=id, user_id=current_user.id).warning(
-            "Post update failed: Unauthorized access"
-        )
-        raise UnauthorizedActionError(detail="Not authorized to edit this post")
+    verify_ownership(current_user, db_post.author_id)
 
     try:
         update_data = post_update.model_dump(exclude_unset=True)
@@ -74,37 +113,44 @@ async def update_post(
             setattr(db_post, key, value)
         db.commit()
         db.refresh(db_post)
-        logger.bind(post_id=id, updated_fields=list(update_data.keys())).info("Updated post")
+
+        # FIX: Invalidate cache after update so stale data isn't returned.
+        # Previously, the cache was never cleared on update, causing GET to return old data.
+        await delete_cache_pattern(f"post:{id}")       # invalidate single post cache
+        await delete_cache_pattern("posts:all:*")      # invalidate list cache
+
+        logger.info(f"Updated post", extra={"post_id": id, "updated_fields": list(update_data.keys())})
         return db_post
-    except SQLAlchemyError as e:
+    except Exception as e:
+        logger.error(f"Failed to update post: {str(e)}", exc_info=True)
         db.rollback()
-        logger.bind(error=str(e)).error("Failed to update post")
-        raise AppException(detail="Failed to update post")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.delete("/{id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_post(
+async def delete_post(  # FIX: Changed from `def` to `async def` to support await calls below
     id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(UserRole.AUTHOR, UserRole.ADMIN)),
+    current_user: User = Depends(require_roles(UserRole.AUTHOR, UserRole.ADMIN))
 ):
     db_post = db.query(Post).filter(Post.id == id).first()
     if not db_post:
-        logger.bind(post_id=id).warning("Post deletion failed: Not found")
-        raise PostNotFoundError()
+        raise HTTPException(status_code=404, detail="Post not found")
 
-    if current_user.role != UserRole.ADMIN and db_post.author_id != current_user.id:
-        logger.bind(post_id=id, user_id=current_user.id).warning(
-            "Post deletion failed: Unauthorized access"
-        )
-        raise UnauthorizedActionError(detail="Not authorized to delete this post")
+    verify_ownership(current_user, db_post.author_id)
 
     try:
         db.delete(db_post)
         db.commit()
-        logger.bind(post_id=id, deleted_by=current_user.id).info("Deleted post")
+
+        # FIX: Invalidate cache after delete so deleted post isn't returned from cache.
+        # Previously, the cache was never cleared on delete, causing GET to return deleted data.
+        await delete_cache_pattern(f"post:{id}")       # invalidate single post cache
+        await delete_cache_pattern("posts:all:*")      # invalidate list cache
+
+        logger.info(f"Deleted post", extra={"post_id": id, "deleted_by": current_user.id})
         return None
-    except SQLAlchemyError as e:
+    except Exception as e:
+        logger.error(f"Failed to delete post: {str(e)}", exc_info=True)
         db.rollback()
-        logger.bind(error=str(e)).error("Failed to delete post")
-        raise AppException(detail="Failed to delete post")
+        raise HTTPException(status_code=500, detail="Internal server error")
