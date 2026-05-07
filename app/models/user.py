@@ -5,6 +5,7 @@ from sqlalchemy import Column, Integer, String, Enum, DateTime
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 
+
 from app.database import Base
 
 
@@ -33,3 +34,4 @@ class User(Base):
 
     def __repr__(self):
         return f"<User(id={self.id}, username='{self.username}', role='{self.role}')>"
+    

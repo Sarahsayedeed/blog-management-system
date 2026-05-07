@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Post · Blog Management System</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body data-page="post">
+    <header class="header">
+      <div class="container header__inner">
+        <div class="header__left">
+          <a class="header__titleLink" href="/ui/">Blog Management System</a>
+          <nav class="nav">
+            <a class="nav__link nav__link--guest" href="/ui/register.html">Register</a>
+            <a class="nav__link nav__link--guest" href="/ui/login.html">Login</a>
+            <a class="nav__link" href="/ui/posts.html">Posts</a>
+            <a class="nav__link" href="/ui/users.html" data-role="admin">Users</a>
+          </nav>
+        </div>
+        <div class="header__right">
+          <span id="authStatus" class="muted">Not signed in</span>
+          <button id="btnLogout" class="btn btn--secondary" type="button" hidden>Logout</button>
+        </div>
+      </div>
+    </header>
+
+    <main class="container">
+      <section class="card" id="alerts" hidden>
+        <div id="alertText" class="alert"></div>
+      </section>
+
+      <section class="card">
+        <div class="row row--space">
+          <h2 class="card__title">Post</h2>
+          <div class="row">
+            <a id="linkEditPost" class="btn btn--secondary" href="#" hidden>Edit</a>
+            <a class="btn btn--secondary" href="/ui/posts.html">← Back</a>
+          </div>
+        </div>
+        <div id="postDetails" class="panel muted">Loading…</div>
+      </section>
+
+      <section class="card" id="commentsCard">
+        <div class="row row--space">
+          <h2 class="card__title">Comments</h2>
+          <span id="commentsHint" class="muted small"></span>
+        </div>
+
+        <form id="formAddComment" class="form" hidden>
+          <label class="field">
+            <span>New comment</span>
+            <textarea name="body" rows="3" maxlength="1000" required></textarea>
+          </label>
+          <button class="btn" type="submit">Add comment</button>
+        </form>
+
+        <ul id="commentsList" class="list"></ul>
+        <div id="commentsPagination"></div>
+      </section>
+    </main>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>

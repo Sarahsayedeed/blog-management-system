@@ -15,12 +15,14 @@ from app.schemas.user import (
     UserLogin,
     UserResponse,
     Token,
+    UserRoleUpdate,
 )
 from app.services.auth_service import verify_password, create_access_token
 from app.services.user_service import (
     get_user_by_username,
     get_user_by_email,
     get_all_users,
+    get_user_by_id,
     create_user,
 )
 from app.dependencies.auth import (
@@ -53,6 +55,10 @@ def register(user_data: UserCreate, db: Session = Depends(get_db)):
             status_code=status.HTTP_409_CONFLICT,
             detail=f"Email '{user_data.email}' is already registered",
         )
+
+    # SECURITY: Force role to READER for public registration.
+    # Admin/Author roles can only be assigned by an existing admin.
+    user_data.role = UserRole.READER
 
     new_user = create_user(db, user_data)
     return new_user
@@ -136,3 +142,46 @@ def list_users(
 ):
     users = get_all_users(db, skip=skip, limit=limit)
     return users
+
+@router.put(
+    "/users/{user_id}/role",
+    response_model=UserResponse,
+    summary="Update a user's role (Admin only)",
+)
+def update_user_role(
+    user_id: int,
+    role_data: UserRoleUpdate,
+    current_user: User = Depends(require_roles(UserRole.ADMIN)),
+    db: Session = Depends(get_db),
+):
+    # Find target user
+    target_user = get_user_by_id(db, user_id)
+    if not target_user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"User with id {user_id} not found",
+        )
+
+    # Prevent admin from demoting themselves (avoid lockout)
+    if target_user.id == current_user.id and role_data.role != UserRole.ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You cannot change your own admin role",
+        )
+
+    logger.info(
+        "Role updated",
+        extra={
+            "admin_id": current_user.id,
+            "target_user_id": user_id,
+            "old_role": target_user.role.value,
+            "new_role": role_data.role.value,
+        },
+    )
+
+    # Update and save
+    target_user.role = role_data.role
+    db.commit()
+    db.refresh(target_user)
+
+    return target_user

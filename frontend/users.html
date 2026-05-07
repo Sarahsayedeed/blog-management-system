@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Users · Blog Management System</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body data-page="users">
+    <header class="header">
+      <div class="container header__inner">
+        <div class="header__left">
+          <a class="header__titleLink" href="/ui/">Blog Management System</a>
+          <nav class="nav">
+            <a class="nav__link nav__link--guest" href="/ui/register.html">Register</a>
+            <a class="nav__link nav__link--guest" href="/ui/login.html">Login</a>
+            <a class="nav__link" href="/ui/posts.html">Posts</a>
+            <a class="nav__link" href="/ui/users.html" data-role="admin">Users</a>
+          </nav>
+        </div>
+        <div class="header__right">
+          <span id="authStatus" class="muted">Not signed in</span>
+          <button id="btnLogout" class="btn btn--secondary" type="button" hidden>Logout</button>
+        </div>
+      </div>
+    </header>
+
+    <main class="container">
+      <section class="card" id="alerts" hidden>
+        <div id="alertText" class="alert"></div>
+      </section>
+
+      <section class="card">
+        <div class="row row--space">
+          <h2 class="card__title">User Management</h2>
+          <button id="btnLoadUsers" class="btn btn--secondary" type="button">Load users</button>
+        </div>
+        <p class="muted small">Restricted to <strong>ADMIN</strong> role. Calls <code>GET /auth/users</code>.</p>
+
+        <div id="usersAccessGuard" class="access-guard" hidden>
+          You need <strong>ADMIN</strong> privileges to view this page.
+          Reader and Author accounts cannot list other users.
+        </div>
+
+        <div id="usersOutput" class="muted">(click Load to fetch users)</div>
+      </section>
+    </main>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>
