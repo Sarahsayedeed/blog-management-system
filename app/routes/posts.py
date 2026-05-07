@@ -15,7 +15,7 @@ router = APIRouter(prefix="/posts", tags=["Posts"])
 
 
 @router.post("/", response_model=PostResponse, status_code=status.HTTP_201_CREATED)
-def create_post(
+async def create_post(
     post: PostCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_roles(UserRole.AUTHOR, UserRole.ADMIN))
@@ -25,6 +25,10 @@ def create_post(
         db.add(new_post)
         db.commit()
         db.refresh(new_post)
+
+        # Cache Invalidation: The new post must appear in the lists
+        await delete_cache_pattern("posts:all:*")
+        
         logger.info(f"Created new post", extra={"post_id": new_post.id, "author_id": current_user.id})
         return new_post
     except Exception as e:
@@ -35,6 +39,12 @@ def create_post(
 
 @router.get("/", response_model=List[PostResponse])
 async def list_posts(skip: int = 0, limit: int = 10, db: Session = Depends(get_db)):
+    # Edge case: pagination validation
+    if skip < 0:
+        raise HTTPException(status_code=400, detail="skip must be >= 0")
+    if limit < 1 or limit > 100:
+        raise HTTPException(status_code=400, detail="limit must be between 1 and 100")
+        
     cache_key = f"posts:all:skip_{skip}:limit_{limit}"
 
     # --- Step 1: Try to fetch from Redis cache first ---
@@ -106,9 +116,13 @@ async def update_post(  # FIX: Changed from `def` to `async def` to support awai
         raise HTTPException(status_code=404, detail="Post not found")
 
     verify_ownership(current_user, db_post.author_id)
+     
+    # Edge case: empty update body
+    update_data = post_update.model_dump(exclude_unset=True)
+    if not update_data:
+        raise HTTPException(status_code=400, detail="No fields provided for update")
 
     try:
-        update_data = post_update.model_dump(exclude_unset=True)
         for key, value in update_data.items():
             setattr(db_post, key, value)
         db.commit()
