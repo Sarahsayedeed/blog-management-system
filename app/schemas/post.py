@@ -1,6 +1,7 @@
-from pydantic import BaseModel, Field
-from typing import Optional
+from pydantic import BaseModel, field_validator,Field, ConfigDict 
 from datetime import datetime
+from typing import Optional
+
 
 # 1. Base Schema: Contains fields shared across multiple schemas
 class PostBase(BaseModel):
@@ -46,5 +47,7 @@ class PostResponse(PostBase):
 
     # This configuration is crucial. It tells Pydantic to read the data 
     # even if it is not a standard dictionary (i.e., reading directly from an SQLAlchemy model).
-    class Config:
-        from_attributes = True  # Note: Use `orm_mode = True` if your project uses Pydantic V1
+     # Crucial for SQLAlchemy compatibility
+
+    model_config = ConfigDict(from_attributes=True)
+
