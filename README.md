@@ -257,4 +257,16 @@ docker-compose up --build
 
 ### Data Source
 - Add Prometheus as data source: `http://prometheus:9090`
+
+-----------------------------------------------------
+### 🚀 Benchmarking Results (Real-time Test)
+During our performance testing, we achieved the following results:
+
+| Metric | Database (Cache Miss) | Redis Cache (Cache Hit) | Improvement |
+|--------|-----------------------|-------------------------|-------------|
+| **Response Time** | 0.3912s | 0.0224s | **94.29% Faster** |
+
+**Result:** Redis is **17.5x faster** than direct Database access in our environment.
 ```
+
+
